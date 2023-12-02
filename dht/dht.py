@@ -6,57 +6,58 @@ import time
 import struct
 import traceback
 import subprocess
+from threading import Timer
 
-def split_nodes(nodes):
-    length = len(nodes)
-    if (length % 26) != 0:
-        return
+# def split_nodes(nodes):
+#     length = len(nodes)
+#     if (length % 26) != 0:
+#         return
 
-    info = []
-    for i in range(0, length, 26):
-        nid = nodes[i:i+20]
-        ip = socket.inet_ntoa(nodes[i+20:i+24])
-        port = struct.unpack("!H", nodes[i+24:i+26])[0]
-        info.append((nid, ip, port))
+#     info = []
+#     for i in range(0, length, 26):
+#         nid = nodes[i:i+20]
+#         ip = socket.inet_ntoa(nodes[i+20:i+24])
+#         port = struct.unpack("!H", nodes[i+24:i+26])[0]
+#         info.append((nid, ip, port))
 
-    return info
+#     return info
 
-def get_data_from_dht_node(peer):
-    print(peer)
-    ip, port = peer
+# def get_data_from_dht_node(peer):
+#     print(peer)
+#     ip, port = peer
 
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-        sock.settimeout(3)
+#     try:
+#         sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+#         sock.settimeout(3)
 
-        sock.connect((ip, port))
+#         sock.connect((ip, port))
 
-        # handshake = {
-        #     b'm': {
-        #         b'LT_metadata': 1,
-        #         b'ut_pex': 2
-        #     },
-        #     b'p': port,
-        #     b'v': b'Torrent 1.2'
-        # }
+#         # handshake = {
+#         #     b'm': {
+#         #         b'LT_metadata': 1,
+#         #         b'ut_pex': 2
+#         #     },
+#         #     b'p': port,
+#         #     b'v': b'Torrent 1.2'
+#         # }
 
-        # handshake_encoded = bencoding.encode(handshake)
+#         # handshake_encoded = bencoding.encode(handshake)
 
-        # sock.sendall(handshake_encoded)
+#         # sock.sendall(handshake_encoded)
 
-        res=sock.recv(1024)
-        print(res)
+#         res=sock.recv(1024)
+#         print(res)
 
-        data = {
-            b'msg_type': 0, 
-            b'piece': 0
-        }
-        # data_encoded = bencoding.encode(data)
-        # sock.sendall(data_encoded)
-        # res = sock.recv(1024)
-        # print(res)
-    except Exception as e:
-        print(str(e))
+#         data = {
+#             b'msg_type': 0, 
+#             b'piece': 0
+#         }
+#         # data_encoded = bencoding.encode(data)
+#         # sock.sendall(data_encoded)
+#         # res = sock.recv(1024)
+#         # print(res)
+#     except Exception as e:
+#         print(str(e))
 
 
 def newID():
@@ -73,24 +74,46 @@ def newID():
     # time.sleep(1 * 60)
 
 
-def get_info_from_dht(info_hash):
-    import subprocess
+#Callback is used to notify user of new peer
+def get_info_from_dht(info_hash, callback):
+    from subprocess import Popen, PIPE, STDOUT
+    from watchdog_timer import WatchdogTimer
+    
     proc = subprocess.Popen(['node', 'dht/index.js', info_hash], stdout=subprocess.PIPE)
     
     ips = []
         
-    while len(ips) <= 100:
-        line = proc.stdout.readline().decode()
-        if not line:
-            break
-        
-        ip, port = [peer for peer in line.rstrip().split(':')]
+    timeout = 3
+    with Popen(['node', 'dht/index.js', info_hash], stdout=PIPE, stderr=STDOUT, universal_newlines=True) as process:  # text mode
+    # kill process in timeout seconds unless the timer is restarted
+        watchdog = WatchdogTimer(timeout, callback=process.kill, daemon=True)
+        watchdog.start()
+        for line in process.stdout:
+            # don't invoke the watcthdog callback if do_something() takes too long
+            with watchdog.blocked:
+                if not line:  # some criterium is not satisfied
+                    process.kill()
+                    break
+                
+                ip, port = [peer for peer in line.rstrip().split(':')]
+                #ips.append((ip, int(port)))
+                callback((ip, int(port)))
 
-        ips.append((ip, int(port)))
+                watchdog.restart()  # restart timer just before reading the next line
+        watchdog.cancel()
+
+    # while True:
+    #     line = proc.stdout.readline().decode()
+    #     if not line:
+    #         break
+        
+    #     ip, port = [peer for peer in line.rstrip().split(':')]
+
+    #     ips.append((ip, int(port)))
 
     proc.kill()
     
-    return ips
+    #return ips
 
 # def get_info_from_dht(info_hash):
 #     try:

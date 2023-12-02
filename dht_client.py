@@ -7,6 +7,7 @@ import struct
 import binascii
 import torrent_util
 import time
+import threading
 
 class DhtClient:
     def __init__(self, ip, port, info, vpn_interface=None):
@@ -17,6 +18,8 @@ class DhtClient:
 
         self.is_running = False
         self.is_choking = True
+
+        self.metadata_size = 0
 
         self.vpn_interface = vpn_interface
 
@@ -29,11 +32,16 @@ class DhtClient:
         elif msg_id == Messages.MSG_CHOKE:
             self.is_choking = True
         elif msg_id == Messages.EXTENDED:
-            #Recieved piece data
-            n = self.message.read_metadata_piece(state['index'], self.meta_data_buf, payload, self.metadata_size)
+            #Handshake
+            if self.metadata_size == 0:
+                self.meta_data_info = bencoding.decode(payload)
+                self.metadata_size = self.meta_data_info[b'metadata_size']
+            else:
+                #Recieved piece data
+                n = self.message.read_metadata_piece(state['index'], self.meta_data_buf, payload, self.metadata_size)
 
-            state['downloaded'] += n
-            state['backlog'] -= 1
+                state['downloaded'] += n
+                state['backlog'] -= 1
 
 
     def read_message(self, sock, state):
@@ -57,9 +65,9 @@ class DhtClient:
             'backlog': 0
         }
         # print("Attemping to download piece")
-        while state["downloaded"] < work['length']:
+        while not self.stop_event.is_set() and state["downloaded"] < work['length']:
             if not self.is_choking:
-                while state['backlog'] < 5 and state['requested'] < work['length']:
+                while state['backlog'] < 1 and state['requested'] < work['length']:
                     block_size = 16384
                     if work['length'] - state['requested'] < block_size:
                         block_size = work['length'] - state['requested']
@@ -80,16 +88,15 @@ class DhtClient:
 
         return True
 
-    def start_retrieval(self, sock_conn, meta_data):
-        self.meta_data_info = bencoding.decode(meta_data['payload'])
-        self.metadata_size = self.meta_data_info[b'metadata_size']
+    def start_retrieval(self, sock_conn):
+        while self.metadata_size == 0:
+            resp = self.read_message(sock_conn, None)
+            if resp == -1:
+                sock_conn.close()
+                return None
 
         self.buf = bytearray(self.metadata_size)
         num_pieces = math.ceil(self.metadata_size / 16384)
-
-        #Send metadata handshake
-        metadata_handshake = self.message.create_metadata_handshake()
-        sock_conn.send(metadata_handshake)
         
         work_queue = Queue(maxsize=num_pieces)
         for ind in range(num_pieces):
@@ -98,21 +105,45 @@ class DhtClient:
 
         self.meta_data_buf = bytearray(self.metadata_size)
 
-        while not work_queue.empty():
+        
+        while not self.stop_event.is_set() and not work_queue.empty():
             work = work_queue.get()
+
             buf = self.attempt_download_piece(work, sock_conn)
             if not buf:
                 work_queue.put(work)
                 sock_conn.close()
                 return
 
-        sock_conn.close()
-        return self.meta_data_buf
+            work_queue.task_done()
 
-    def start(self):
+        sock_conn.close()
+
+        self.global_info = self.meta_data_buf
+        return self.meta_data_buf, self.meta_data_info
+
+    def threadsafe_function(fn):
+        """decorator making sure that the decorated function is thread safe"""
+        lock = threading.Lock()
+        def new(*args, **kwargs):
+            lock.acquire()
+            try:
+                r = fn(*args, **kwargs)
+            except Exception as e:
+                raise e
+            finally:
+                lock.release()
+            return r
+        return new  
+
+    # @threadsafe_function
+    def start(self, stop_event):
+        self.stop_event = stop_event
+
         self.message = Messages()
         sock_conn = self.message.create_conn(self.ip, self.port, 1, vpn_ip=self.vpn_interface)
         
+
         try:    
             if not sock_conn:
                 return None
@@ -121,10 +152,11 @@ class DhtClient:
             bt_handshake = self.message.create_handshake(self.info['info_hash'], self.info['peer_id'])
             sock_conn.sendall(bt_handshake)
 
-            metadata_handshake = self.message.create_metadata_handshake()
-            sock_conn.sendall(metadata_handshake)
+            # metadata_handshake = self.message.create_metadata_handshake()
+            # sock_conn.sendall(metadata_handshake)
 
             resp = sock_conn.recv(len(bt_handshake))
+
             if not resp:
                 print("No data!")
                 sock_conn.close()
@@ -146,24 +178,31 @@ class DhtClient:
                 return None
 
 
-            resp = self.message.recieve_data(sock_conn)
-            if not resp:
-                return None
+            # resp = self.message.recieve_data(sock_conn)
+            # if not resp:
+            #     return None
 
+            # self.message.send_unchoke(sock_conn)
+            # self.message.send_interested(sock_conn)   
+            self.is_choking = False
 
-            if resp['id'] == Messages.MSG_BITFIELD:
-                meta_data = self.message.recieve_data(sock_conn)
-                self.meta_data = meta_data
+            # if resp['id'] == Messages.EXTENDED:
+            #     return self.start_retrieval(sock_conn, resp['payload'])
 
-                return self.start_retrieval(sock_conn, meta_data)
-            elif resp['id'] == Messages.EXTENDED:
-                self.meta_data = resp
-                bitfield = self.message.recieve_data(sock_conn)
-                
-                return self.start_retrieval(sock_conn, resp)
+            self.bitfield = bytearray(8)
+            return self.start_retrieval(sock_conn)
+        # if resp['id'] == Messages.MSG_BITFIELD:
+        #     resp = self.message.recieve_data(sock_conn)
+
+        #     return self.start_retrieval(sock_conn, resp['payload'])
+        # elif resp['id'] == Messages.EXTENDED:
+        #     self.bitfield = self.message.recieve_data(sock_conn)
+            
+        #     return self.start_retrieval(sock_conn, resp['payload'])
 
         except Exception as e:
             print(e)
             #traceback.print_exc()
 
+        sock_conn.close()
         return None

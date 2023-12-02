@@ -17,7 +17,7 @@ def decode(data):
         elif chr(data[ind]) == 'l':
             if type(stack[-1]) is list:
                 stack[-1].append([])
-                stack.append(stack[-1])
+                stack.append(stack[-1][-1])
             else:
                 stack[-1][prev_str] = []
                 stack.append(stack[-1][prev_str])
@@ -79,16 +79,18 @@ def encode(data, ben_str=bytes(b"")):
             else:
                 ben_str += b"%d:%b" %(len(key), key)
                 ben_str = encode(value, ben_str)
+
+        ben_str += b'e'
     elif type(data) is list:
         ben_str += b'l'
         for child in data:
             ben_str = encode(child, ben_str)
+        ben_str += b'e'
     else:
         if type(data) is bytes:
             ben_str += b"%d:%b" % (len(data), data)
-        else:
+        elif type(data) is int:
             ben_str += b"i%de" % (data)  
 
-    ben_str += b'e'
     return ben_str
 

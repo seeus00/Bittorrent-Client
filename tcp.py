@@ -15,8 +15,11 @@ def get_peers(payload, announce_url):
     try:
         r = requests.get(get_req, headers=headers)
         data = bencoding.decode(r.content)
-        peers = data[b'peers']
 
+        if not b'peers' in data:
+            return []
+
+        peers = data[b'peers']
         return peer_helper.parse_ips(peers)
     except Exception as e:
         print(e)

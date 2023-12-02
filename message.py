@@ -16,6 +16,10 @@ class Messages:
     MSG_PIECE = 7
     MSG_CANCEL = 8
 
+    MSG_HAVE_ALL = 14
+    MSG_HAVE_NONE = 15
+    MSG_ALLOWED_FAST_PIECE = 17
+
     EXTENDED = 20
 
     def __init__(self):
@@ -75,10 +79,18 @@ class Messages:
 
     def send_metadata_request(self, sock, bencode_data, ext_id):
         encoded = bencoding.encode(bencode_data)
-
         msg_len = 1 + 1 + len(encoded)
         bytes_data = struct.pack(f">Ibb{len(encoded)}s", msg_len, Messages.EXTENDED, ext_id, encoded)
 
+        sock.sendall(bytes_data)
+
+    def send_keep_alive(self, sock):
+        bytes_data = struct.pack('>I', 0)
+        sock.sendall(bytes_data)
+
+
+    def send_have_none(self, sock):
+        bytes_data = struct.pack('>Ib', 1, Messages.MSG_HAVE_NONE)
         sock.sendall(bytes_data)
 
     def send_have(self, sock, ind):
@@ -89,11 +101,10 @@ class Messages:
         bytes_data = struct.pack('>IbIII', 13, Messages.MSG_REQUEST, ind, beg, length)
         sock.sendall(bytes_data)
 
-    def create_metadata_handshake(self):
+    def create_metadata_handshake(self, info):
         handshake_msg = {
-            'm': {
-                'ut_metadata': 2,
-            },
+            'm': info[b'm'],
+            'metadata_size': info[b'metadata_size'],
             'p': 6881,
             'v': 'qbittorrent 1.0'
         }
@@ -120,9 +131,12 @@ class Messages:
         data = struct.unpack_from('>b19s8s20s20s', buffer_data)
         return data
 
-    def send_handshake(self, sock_conn, torrent_info):
-        reserved = bytearray(8)
+    def send_handshake(self, sock_conn, torrent_info, reserved):
+        # reserved = bytearray(8)
     
+        # # reserved[5] |= 0x10 #Set reserved byte for metadata
+        # reserved[7] |= 0x04 #Set reserved by for fast extension 
+
         pstrlen = b'\x13'
         pstr = b"BitTorrent protocol"
         info_hash_str = bytes.fromhex(torrent_info['info_hash'])
@@ -134,12 +148,11 @@ class Messages:
             data = sock_conn.recv(len(handshake))
             return data
         except Exception as e:
-            print(e)
-            print("HANDSHAKE FAILED TO SEND!")
+            #print("HANDSHAKE FAILED TO SEND!")
             return None
         
 
-    def create_conn(self, ip, port, default_timeout=3, vpn_ip=None):
+    def create_conn(self, ip, port, default_timeout=20, vpn_ip=None):
         try:
             s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             if vpn_ip:
@@ -151,9 +164,12 @@ class Messages:
             s.connect((ip, port))
             return s
         except socket.error as e:
-            print(e)
+            return None
+            #print(e)
         return None
 
+            
+           
 
     def handle_choke(self, sock):
         sock.close()
