@@ -33,7 +33,8 @@ class Client:
 
         self.vpn_interface = vpn_interface
         self.metadata_info = metadata_info
-
+        self.bitfield = bytearray(math.ceil(len(self.info['piece_hashes'])))
+        
         self.last_active = datetime.datetime.now(datetime.timezone.utc)
         self.sock_conn = None
 
@@ -117,10 +118,11 @@ class Client:
     def disconnect(self):
         if self.sock_conn:
             self.sock_conn.close()
-        self.is_running = False
-
+        
         if self.disconnect_callback:
             self.disconnect_callback(self)
+
+        self.is_running = False
 
     def start(self, work_queue, results):
         self.last_active = datetime.datetime.now(datetime.timezone.utc)
@@ -167,7 +169,7 @@ class Client:
         #     print("NO BITFIELD")
 
         #The bitfield has the same number as piece hashes, but bitfield.py sets the bits 
-        self.bitfield = bytearray(math.ceil(len(self.info['piece_hashes'])))
+        
         
         msg = self.read_message(self.sock_conn, None)
         if msg == -1:
@@ -182,7 +184,7 @@ class Client:
                 
                 if not bitfield.has_piece(self.bitfield, work['index']):
                     work_queue.put(work)
-                    time.sleep(10)
+                    time.sleep(1)
                     continue
                 
                 buf = self.attempt_download_piece(work, self.sock_conn)

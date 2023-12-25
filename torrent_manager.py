@@ -143,16 +143,16 @@ class TorrentManager:
             print("FINISHED")
             self.finished = True
 
-        self.process_trackers_timer.cancel()
-        self.process_peers_timer.cancel()
+        # self.process_trackers_timer.cancel()
+        # self.process_peers_timer.cancel()
 
         #Disconnect all clients as the file is done (if seeding is implemented, don't disconnect every peer, only the ones that are done downloading)
         for client in self.clients:
             client.disconnect()
 
-        self.get_peers_thread = None
-        self.process_trackers_timer = None
-        self.process_peers_timer = None
+        # self.get_peers_thread = None
+        # self.process_trackers_timer = None
+        # self.process_peers_timer = None
 
     def get_peers(self):
         payload = {
@@ -364,26 +364,30 @@ class TorrentManager:
     
 
     def process_peers(self):
-        # print("Processing peers")
-        for client in self.clients[:]:
-            if self.finished:
-                break
-            if not client.is_running:
-                continue
-            if not client.sock_conn:
-                continue
+        while not self.finished:
+            for client in self.clients[:]:
+                try:
+                    if self.finished:
+                        break
+                    if not client.is_running:
+                        continue
+                    if not client.sock_conn:
+                        continue
 
-                
-            #If client hasn't recieved any new messages in over 30 seconds, then disconnect
-            if (datetime.datetime.now(datetime.timezone.utc) - client.last_active).total_seconds() > 30:
-                client.disconnect() 
-                continue
+                        
+                    #If client hasn't recieved any new messages in over 30 seconds, then disconnect
+                    if (datetime.datetime.now(datetime.timezone.utc) - client.last_active).total_seconds() > 30:
+                        client.disconnect() 
+                        continue
 
-            if client.is_choking:
-                client.message.send_unchoke(client.sock_conn)
-                # client.message.send_interested(client.sock_conn)   
-            
-            client.send_keep_alive()
+                    if client.is_choking:
+                        client.message.send_unchoke(client.sock_conn)
+                        # client.message.send_interested(client.sock_conn)   
+                    
+                    client.send_keep_alive()
+                except Exception as e:
+                    pass
+            time.sleep(2)
 
             
             
@@ -406,6 +410,12 @@ class TorrentManager:
                 
             #     concurrent.futures.wait(futures)
             time.sleep(30)
+
+    def get_new_dht_peers(self):
+        while not self.finished:
+            time.sleep(5)
+            dht.get_info_from_dht(self.info['info_hash'],self.start_worker)
+
 
     def download(self):
         if not self.info:
@@ -445,11 +455,11 @@ class TorrentManager:
         # self.start_workers()
         
         # #Tries to get new peers from dht every 10 seconds
-        self.process_trackers_timer = threading.Timer(10, dht.get_info_from_dht, args=(self.info['info_hash'],self.start_worker,))
-        self.process_trackers_timer.start()
+        self.process_trackers_thread = threading.Thread(target=self.get_new_dht_peers)
+        self.process_trackers_thread.start()
 
-        self.process_peers_timer = threading.Timer(2, self.process_peers)
-        self.process_peers_timer.start()
+        self.process_peers_thread = threading.Thread(target=self.process_peers)
+        self.process_peers_thread.start()
     
 
       

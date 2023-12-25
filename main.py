@@ -20,11 +20,12 @@ if __name__ == "__main__":
         vpn_ip = addrs[vpn_interface][0][1]
 
         manager = torrent_manager.TorrentManager(vpn_interface=vpn_ip)
-        # manager.download_torrent("https://sukebei.nyaa.si/download/4008011.torrent")
+        #manager.download_torrent("https://sukebei.nyaa.si/download/4013891.torrent")
         # manager.download_torrent_from_file("C:/Users/casey/Downloads/linuxmint-21.2-cinnamon-64bit.iso.torrent")
         # manager.download_torrent_from_file("C:/Users/casey/Downloads/So I'm a Spider, So What [Yen Press] [LuCaZ].torrent")
-        manager.download_torrent("https://sukebei.nyaa.si/download/4010005.torrent")
-  
+        # manager.download_torrent("https://sukebei.nyaa.si/download/4010005.torrent")
+        manager.download_torrent_from_file("C:/Users/casey/Downloads/debian.torrent")
+
     #manager = torrent_manager.TorrentManager()
     #manager.download_torrent_from_file("C:/Users/casey/Downloads/debian.torrent")
 
